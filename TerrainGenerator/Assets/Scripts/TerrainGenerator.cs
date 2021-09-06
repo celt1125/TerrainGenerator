@@ -12,10 +12,12 @@ public class TerrainGenerator : MonoBehaviour
 	private Vector2 min_max = new Vector2(0f, 0f);
 	private Texture2D texture;
 	private int texture_resolution = 50;
+	private Erosion erosion;
 	
 	public Material material;
 	public TerrainSetting settings;
 	public Gradient gradient;
+	public bool enable_erosion = true;
 	
 	void Start(){
 		/*
@@ -38,10 +40,12 @@ public class TerrainGenerator : MonoBehaviour
 		GetComponent<MeshRenderer>().material = material;
 		
 		SetBase(settings.resolution);
-		SetHeight(settings);
+		//SetHeight(settings);
 		
 		texture = new Texture2D(texture_resolution, 1);
 		SetMaterial();
+		
+		erosion = GetComponent<Erosion>();
 	}
 	
 	void Update(){
@@ -50,6 +54,13 @@ public class TerrainGenerator : MonoBehaviour
 		if (current_base.resolution != settings.resolution)
 			SetBase(settings.resolution);
 		SetHeight(settings);
+		
+		if (enable_erosion){
+			if (erosion == null)
+				erosion = GetComponent<Erosion>();
+			erosion.ErodeMethod1(height, 1f / settings.resolution, settings.resolution, settings);
+			enable_erosion = false;
+		}
 	}
 	
 	private void SetBase(int n){
@@ -85,14 +96,16 @@ public class TerrainGenerator : MonoBehaviour
 		
 		for (int i = 0; i < n; i++){ // z
 			for (int j = 0; j < n; j++){ // x
+				scale = s.scale;
+				amplitude = s.amplitude;
 				for (int layer = 0; layer < layers; layer++){
-					height[i * n + j] = amplitude * Mathf.PerlinNoise(	(float)j / (n - 1) * scale + shift.x,
+					height[i * n + j] += amplitude * Mathf.PerlinNoise(	(float)j / (n - 1) * scale + shift.x,
 																		(float)i / (n - 1) * scale + shift.y);
 					//height = SmoothMax(height, 0f, smoothness);
-					new_vertices[i * n + j] += new Vector3(0f, height[i * n + j], 0f);
 					scale *= lacunarity;
 					amplitude *= persistence;
 				}
+				new_vertices[i * n + j] += new Vector3(0f, height[i * n + j], 0f);
 				new_vertices[i * n + j] += current_base.vertices[i * n + j];
 				
 				min_max.x = min_max.x > new_vertices[i * n + j].y ? new_vertices[i * n + j].y : min_max.x;

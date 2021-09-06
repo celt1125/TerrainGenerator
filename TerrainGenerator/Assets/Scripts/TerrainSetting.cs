@@ -16,6 +16,7 @@ public class TerrainSetting
 	public float smoothness = 0.8f;
 	
 	[Header("Erosion settings")]
+	public int iterations = 100;
 	public float delta_time = 0.02f;
 	public float rain_rate = 0.012f;
 	public float evaporation_rate = 0.015f;
