@@ -34,6 +34,6 @@ public class TerrainSetting
 	public float inertia = 0.05f;
 	public float drop_volume = 0.1f;
 	public int brush_radius = 3;
-	public int seed;
+	public int seed = 5731;
 	
 }	

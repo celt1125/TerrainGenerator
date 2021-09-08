@@ -10,20 +10,19 @@ public class Erosion : MonoBehaviour
 	private int previous_n;
 	private int previous_radius;
 	private int[] compute_kernels = new int[2];
-	
+
 	void Awake()
-    {
+	{
 		previous_n = 0;
 		previous_radius = 0;
 		compute_kernels[0] = erosion_compute.FindKernel("InitializeErosionBrush");
-
-		InitializeErosionBrush(10, 3);
+		compute_kernels[1] = erosion_compute.FindKernel("Erode");
+		/*
+		InitializeErosionBrushCPU(5, 3);
+		for (int i = 0; i < erosion_brush.GetLength(1); i++)
+			Debug.Log($"{erosion_brush[0, i].position}, {erosion_brush[0, i].weight }");
+		*/
 	}
-
-	void Start()
-    {
-		//Debug.DrawLine(new Vector3(0f, 0f, 0f), new Vector3(0f, 3f, 0f), Color.white, 5f);
-    }
 
 	public void ErodeMethod1(float[] height, float cell_len, int n, TerrainSetting s, float[] water_height){
 		//water_height = new float[n * n];
@@ -148,7 +147,7 @@ public class Erosion : MonoBehaviour
 				}
 			}
 		}
-		Debug.Log("finished");
+		// Debug.Log("finished");
 	}
 
 	private float RainFunction(int x, int z, int n){
@@ -167,16 +166,65 @@ public class Erosion : MonoBehaviour
 		return Mathf.Lerp(y1, y2, y-grid_y);
 	}
 
-	public void ErodeMethod2(float[] height, float cell_len, int n, TerrainSetting s, int seed = 5731)
+	public void ErodeMethod2_GPU(float[] height, float cell_len, int n, TerrainSetting s)
     {
 		if (previous_n != n || previous_radius != s.brush_radius)
         {
 			previous_n = n;
 			previous_radius = s.brush_radius;
-			InitializeErosionBrush(n, s.brush_radius);
+			InitializeErosionBrushGPU(n, s.brush_radius);
         }
-		seed = s.seed;
+		
+		int seed = s.seed;
+		Random.InitState(seed);
+		Vector2[] rain_map = new Vector2[s.iterations];
+		for (int i = 0; i < s.iterations; i++)
+			rain_map[i] = new Vector2(Random.Range(0f, (float)(n - 1)), Random.Range(0f, (float)(n - 1)));
+		
+		int brush_array_len = s.brush_radius * s.brush_radius * 4;
+		ComputeBuffer height_buffer = new ComputeBuffer(n * n, sizeof(float));
+		ComputeBuffer rain_map_buffer = new ComputeBuffer(s.iterations * 2, sizeof(float));
+		ComputeBuffer erosion_brush_buffer = new ComputeBuffer(n * n * brush_array_len, sizeof(float) + sizeof(int));
+		height_buffer.SetData(height);
+		rain_map_buffer.SetData(rain_map);
+		erosion_brush_buffer.SetData(erosion_brush);
 
+		erosion_compute.SetBuffer(compute_kernels[1], "erosion_brush", erosion_brush_buffer);
+		erosion_compute.SetInt("n", n);
+		erosion_compute.SetInt("brush_array_len", brush_array_len);
+		erosion_compute.SetInt("radius", s.brush_radius);
+		
+		erosion_compute.SetBuffer(compute_kernels[1], "height", height_buffer);
+		erosion_compute.SetBuffer(compute_kernels[1], "rain_map", rain_map_buffer);
+		erosion_compute.SetInt("iterations", s.iterations);
+		erosion_compute.SetInt("drop_life_time", s.drop_life_time);
+		erosion_compute.SetFloat("sediment_capacity", s.sediment_capacity);
+		erosion_compute.SetFloat("sediment_suspension_rate", s.sediment_suspension_rate);
+		erosion_compute.SetFloat("sediment_deposition_rate", s.sediment_deposition_rate);
+		erosion_compute.SetFloat("evaporation_rate", s.evaporation_rate);
+		erosion_compute.SetFloat("drop_volume", s.drop_volume);
+		erosion_compute.SetFloat("inertia", s.inertia);
+		erosion_compute.SetFloat("gravity", s.gravity);
+		
+		int thread_group_num = Mathf.CeilToInt((float)s.iterations / 64);
+		erosion_compute.Dispatch(compute_kernels[1], thread_group_num, 1, 1);
+
+		height_buffer.GetData(height);
+		height_buffer.Release();
+		rain_map_buffer.Release();
+		erosion_brush_buffer.Release();
+    }
+
+	public void ErodeMethod2_CPU(float[] height, float cell_len, int n, TerrainSetting s)
+    {
+		if (previous_n != n || previous_radius != s.brush_radius)
+        {
+			previous_n = n;
+			previous_radius = s.brush_radius;
+			InitializeErosionBrushCPU(n, s.brush_radius);
+        }
+		
+		int seed = s.seed;
 		Random.InitState(seed);
 		float sediment_capacity = s.sediment_capacity;
 		float sediment_suspension_rate = s.sediment_suspension_rate;
@@ -194,7 +242,6 @@ public class Erosion : MonoBehaviour
 		{
 			Vector2 drop_pos = pos;
 			Vector2 direction = new Vector2(0f, 0f);
-			float volume = s.drop_volume;
 			float sediment = 0f;
 			float speed = 1f;
 
@@ -271,14 +318,14 @@ public class Erosion : MonoBehaviour
 		}
     }
 
-	private void InitializeErosionBrush(int n, int radius)
+	private void InitializeErosionBrushGPU(int n, int radius)
     {
 		int brush_array_len = radius * radius * 4;
 		erosion_brush = new Brush[n* n, brush_array_len];
 		ComputeBuffer erosion_brush_buffer = new ComputeBuffer(n * n * brush_array_len, sizeof(float) + sizeof(int));
 		erosion_brush_buffer.SetData(erosion_brush);
 
-		erosion_compute.SetBuffer(0, "erosion_brush", erosion_brush_buffer);
+		erosion_compute.SetBuffer(compute_kernels[0], "erosion_brush", erosion_brush_buffer);
 		erosion_compute.SetInt("n", n);
 		erosion_compute.SetInt("brush_array_len", brush_array_len);
 		erosion_compute.SetInt("radius", radius);
@@ -288,6 +335,47 @@ public class Erosion : MonoBehaviour
 		erosion_brush_buffer.GetData(erosion_brush);
 
 		erosion_brush_buffer.Release();
+	}
+	
+	private void InitializeErosionBrushCPU(int n, int radius)
+    {
+		int brush_array_len = radius * radius * 4;
+		erosion_brush = new Brush[n* n, brush_array_len];
+
+		for (int id = 0; id < n * n; id++)
+		{
+			int i = 0;
+			float weight_sum = 0;
+			for (int y = -radius; y <= radius; y++)
+			{
+				for (int x = -radius; x <= radius; x++)
+				{
+					int x2 = id % n + x;
+					int y2 = id / n + y;
+
+					if (x2 >= 0 && x2 < n && y2 >= 0 && y2 < n)
+					{
+						int squared_distance = x * x + y * y;
+						int squared_radius = radius * radius;
+						if (squared_distance < squared_radius)
+						{
+							float weight = 1 - (float)squared_distance / squared_radius;
+
+							erosion_brush[id, i].position = y2 * n + x2;
+							erosion_brush[id, i].weight = weight;
+							weight_sum += weight;
+							i++;
+						}
+					}
+				}
+			}
+			for (int j = 0; j < brush_array_len; j++){
+				if (j < i)
+					erosion_brush[id, j].weight /= weight_sum;
+				else
+					erosion_brush[id, j].weight = -1;
+			}
+		}
 	}
 	
 	private (Vector2, float) DropStateCalculate(float[] height, int n, Vector2 drop_pos)

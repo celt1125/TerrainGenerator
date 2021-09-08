@@ -2,7 +2,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-[ExecuteInEditMode]
 public class TerrainGenerator : MonoBehaviour
 {
 	private static Dictionary<int, BaseData> base_terrain;
@@ -19,7 +18,8 @@ public class TerrainGenerator : MonoBehaviour
 	public TerrainSetting settings;
 	public Gradient gradient;
 	public bool enable_erosion = false;
-	public bool ShowWaterHeight =false;
+	public bool ShowWaterHeight = false;
+	public bool UsingGPU = false;
 	
 	
 	void Start(){
@@ -49,14 +49,17 @@ public class TerrainGenerator : MonoBehaviour
 		if (current_base.resolution != n)
 			SetBase(n);
 
-		UpdateHeight();
+		//UpdateHeight();
 		if (enable_erosion){
 			if (erosion == null)
 				erosion = GetComponent<Erosion>();
 
 			//Debug.Log(min_max.y);
 			//erosion.ErodeMethod1(height, 1f / n, n, settings, water_height);
-			erosion.ErodeMethod2(height, 1f / n, n, settings);
+			if (UsingGPU)
+				erosion.ErodeMethod2_GPU(height, 1f / n, n, settings);
+			else
+				erosion.ErodeMethod2_CPU(height, 1f / n, n, settings);
 			enable_erosion = false;
 			UpdateHeight();
 			//Debug.Log(min_max.y);

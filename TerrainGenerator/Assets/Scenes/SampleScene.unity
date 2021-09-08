@@ -165,7 +165,7 @@ MonoBehaviour:
     shift: {x: 0, y: 0}
     amplitude: 0.33
     smoothness: 0.62
-    iterations: 50000
+    iterations: 100000
     delta_time: 0.1
     rain_rate: 0.01
     evaporation_rate: 0.015
@@ -178,7 +178,7 @@ MonoBehaviour:
     inertia: 0.05
     drop_volume: 0.1
     brush_radius: 3
-    seed: 531
+    seed: 5731
   gradient:
     serializedVersion: 2
     key0: {r: 0.4056604, g: 0.20743307, b: 0.016838714, a: 1}
@@ -210,6 +210,7 @@ MonoBehaviour:
     m_NumAlphaKeys: 2
   enable_erosion: 0
   ShowWaterHeight: 0
+  UsingGPU: 0
 --- !u!4 &419005392
 Transform:
   m_ObjectHideFlags: 0

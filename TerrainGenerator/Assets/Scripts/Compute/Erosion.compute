@@ -5,31 +5,51 @@
 
 #define SQUARE(a) ((a * a))
 #define SQ_DIS(x, y) ((SQUARE(x) + SQUARE(y)))
+#define POSITION(m, n) ((((uint)m.y) * n + (uint)m.x))
+#define OFFSET(a) ((a - (uint)a))
+#define GRADIENTX(m, a) (((m.y-m.x) * (1-a) + (m.w-m.z) * a))
+#define GRADIENTY(m, a) (((m.z-m.x) * (1-a) + (m.w-m.y) * a))
+#define LERP(x, y, a) (((x) * (1-a) + (y) * a))
+#define HEIGHT(m, a, b) ((LERP(LERP(m.x, m.y, a), LERP(m.z, m.w, a), b)))
 
 struct Brush{
 	int position;
 	float weight;
 };
 
+// Brush variables
 RWStructuredBuffer<Brush> erosion_brush;
-int n;
-int brush_array_len;
+uint n;
+uint brush_array_len;
 int radius;
+
+// Erosion variables
+RWStructuredBuffer<float> height;
+RWStructuredBuffer<float2> rain_map;
+uint iterations;
+uint drop_life_time;
+float sediment_capacity;
+float sediment_suspension_rate;
+float sediment_deposition_rate;
+float evaporation_rate;
+float drop_volume;
+float inertia;
+float gravity;
 
 [NUMTHREADS]
 void InitializeErosionBrush(uint3 id : SV_DispatchThreadID){
-	if (id.x < (uint)(n * n)){
-		int i = 0;
+	if (id.x < n * n){
+		uint i = 0;
 		float weight_sum = 0;
 		for (int y = -radius; y <= radius; y++){
 			for (int x = -radius; x <= radius; x++){
-				int x2 = id.x % n + x;
-				int y2 = id.x / n + y;
+				uint x2 = id.x % n + x;
+				uint y2 = id.x / n + y;
 				
 				if (x2 >= 0 && x2 < n && y2 >= 0 && y2 < n){
-					int squared_distance = SQ_DIS(x, y);
-					int squared_radius = radius * radius;
-					if(squared_distance < radius * radius){
+					uint squared_distance = SQ_DIS(x, y);
+					uint squared_radius = radius * radius;
+					if(squared_distance < squared_radius){
 						float weight = 1 - (float)squared_distance / squared_radius;
 						
 						erosion_brush[id.x * brush_array_len + i].position = y2 * n + x2;
@@ -41,7 +61,7 @@ void InitializeErosionBrush(uint3 id : SV_DispatchThreadID){
 			}
 		}
 		
-		for (int j = 0; j < brush_array_len; j++){
+		for (uint j = 0; j < brush_array_len; j++){
 			if (j < i)
 				erosion_brush[id.x * brush_array_len + j].weight /= weight_sum;
 			else
@@ -52,5 +72,70 @@ void InitializeErosionBrush(uint3 id : SV_DispatchThreadID){
 
 [NUMTHREADS]
 void Erode(uint3 id : SV_DispatchThreadID){
-	
+	if (id.x < iterations)
+	{
+		float2 drop_pos = rain_map[id.x];
+		float2 direction = float2(0, 0);
+		float sediment = 0;
+		float speed = 1;
+
+		for (uint t = 0; t < drop_life_time; t++)
+		{
+			uint position = POSITION(drop_pos, n);
+			float cell_offset_x = OFFSET(drop_pos.x);
+			float cell_offset_y = OFFSET(drop_pos.y);
+			
+			float4 height_map = float4(	height[position], height[position + 1],
+										height[position + n], height[position + n + 1]);
+			float2 gradient = float2(GRADIENTX(height_map, cell_offset_y), GRADIENTY(height_map, cell_offset_x));
+			float drop_height = HEIGHT(height_map, cell_offset_x, cell_offset_y);
+			
+			// Calculate the moving direction;
+			direction = normalize(direction * inertia - gradient * (1 - inertia));
+
+			// Update the position of the drop
+			drop_pos += direction;
+			if (drop_pos.x <= 0 || drop_pos.x >= (int)n - 1 || drop_pos.y <= 0 || drop_pos.y >= (int)n - 1)
+				break;
+
+			// Calculate the sediment change from the movement of the drop
+			uint new_position = POSITION(drop_pos, n);
+			height_map = float4(height[new_position], height[new_position + 1],
+								height[new_position + n], height[new_position + n + 1]);
+			
+			float height_change = HEIGHT(height_map, OFFSET(drop_pos.x), OFFSET(drop_pos.y)) - drop_height;
+			float C = max(-height_change * speed * drop_volume * sediment_capacity, 0.01);
+
+			if (C >= sediment && height_change < 0)
+			{
+				// The amount of erosion can not exceed the height change; otherwise, a hole will be generated
+				float suspension_amount = min((C - sediment) * sediment_suspension_rate, -height_change);
+				for (uint effected_position = 0; effected_position < brush_array_len; effected_position++)
+				{
+					Brush brush = erosion_brush[position * brush_array_len + effected_position];
+					if (brush.weight < 0)
+						break;
+					float weighted_change = suspension_amount * brush.weight;
+					float sediment_change = min(height[brush.position], weighted_change); // Not exceed the height
+					height[brush.position] -= sediment_change;
+					sediment += sediment_change;
+				}
+			}
+			else
+			{
+				// increase the height when moving uphill.
+				float deposition_amount = (height_change > 0) ? min(height_change, sediment) : (sediment - C) * sediment_deposition_rate;
+				sediment -= deposition_amount;
+
+				// Add the sediment to the four nodes of the current cell using bilinear interpolation
+				height[position] += deposition_amount * (1 - cell_offset_x) * (1 - cell_offset_y);
+				height[position + 1] += deposition_amount * cell_offset_x * (1 - cell_offset_y);
+				height[position + n] += deposition_amount * (1 - cell_offset_x) * cell_offset_y;
+				height[position + n + 1] += deposition_amount * cell_offset_x * cell_offset_y;
+			}
+
+			speed = sqrt(speed * speed + height_change * gravity);
+			drop_volume *= (1 - evaporation_rate);
+		}
+	}
 }
