@@ -7,6 +7,7 @@ public class TerrainGenerator : MonoBehaviour
 {
 	private static Dictionary<int, BaseData> base_terrain;
 	private float[] height;
+	private float[] water_height;
 	private BaseData current_base;
 	private Mesh mesh;
 	private Vector2 min_max = new Vector2(0f, 0f);
@@ -17,18 +18,11 @@ public class TerrainGenerator : MonoBehaviour
 	public Material material;
 	public TerrainSetting settings;
 	public Gradient gradient;
-	public bool enable_erosion = true;
+	public bool enable_erosion = false;
+	public bool ShowWaterHeight =false;
+	
 	
 	void Start(){
-		/*
-		float[] tmp = new float[10000];
-		for (int i = 0; i < 10; i++)
-			for (int j = 0; j < 10; j++)
-				Debug.Log(Mathf.PerlinNoise((float)j / 9, (float)i / 9));
-		
-		Debug.Log(Mathf.Min(tmp));
-		Debug.Log(Mathf.Max(tmp));*/
-		
 		if (GetComponent<MeshFilter>() == null){
 			gameObject.AddComponent<MeshFilter>();
 			gameObject.AddComponent<MeshRenderer>();
@@ -40,7 +34,7 @@ public class TerrainGenerator : MonoBehaviour
 		GetComponent<MeshRenderer>().material = material;
 		
 		SetBase(settings.resolution);
-		//SetHeight(settings);
+		SetHeight(settings);
 		
 		texture = new Texture2D(texture_resolution, 1);
 		SetMaterial();
@@ -49,17 +43,23 @@ public class TerrainGenerator : MonoBehaviour
 	}
 	
 	void Update(){
+		int n = settings.resolution;
 		if (current_base == null)
-			SetBase(settings.resolution);
-		if (current_base.resolution != settings.resolution)
-			SetBase(settings.resolution);
-		SetHeight(settings);
-		
+			SetBase(n);
+		if (current_base.resolution != n)
+			SetBase(n);
+
+		UpdateHeight();
 		if (enable_erosion){
 			if (erosion == null)
 				erosion = GetComponent<Erosion>();
-			erosion.ErodeMethod1(height, 1f / settings.resolution, settings.resolution, settings);
+
+			//Debug.Log(min_max.y);
+			//erosion.ErodeMethod1(height, 1f / n, n, settings, water_height);
+			erosion.ErodeMethod2(height, 1f / n, n, settings);
 			enable_erosion = false;
+			UpdateHeight();
+			//Debug.Log(min_max.y);
 		}
 	}
 	
@@ -92,8 +92,9 @@ public class TerrainGenerator : MonoBehaviour
 		
 		int n = current_base.resolution;
 		Vector3[] new_vertices = new Vector3[n * n];
-		height = new float[n * n];
-		
+		height = new float[n * n]; 
+		water_height = new float[n * n];
+
 		for (int i = 0; i < n; i++){ // z
 			for (int j = 0; j < n; j++){ // x
 				scale = s.scale;
@@ -113,6 +114,21 @@ public class TerrainGenerator : MonoBehaviour
 			}
 		}
 		
+		mesh.SetVertices(new_vertices);
+		SetMaterial();
+		mesh.RecalculateNormals();
+	}
+	
+	private void UpdateHeight(){
+		int n = current_base.resolution;
+		Vector3[] new_vertices = new Vector3[n * n];
+		
+		for(int i = 0; i < n * n; i++){
+			float h = ShowWaterHeight ? water_height[i] : height[i];
+			new_vertices[i] = new Vector3(current_base.vertices[i].x, h, current_base.vertices[i].z);
+			min_max.x = min_max.x > h ? h : min_max.x;
+			min_max.y = min_max.y > h ? min_max.y : h;
+		}
 		mesh.SetVertices(new_vertices);
 		SetMaterial();
 		mesh.RecalculateNormals();

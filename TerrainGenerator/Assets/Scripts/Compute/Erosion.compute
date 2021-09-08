@@ -1,0 +1,56 @@
+#pragma kernel InitializeErosionBrush
+#pragma kernel Erode
+
+#define NUMTHREADS numthreads(64,1,1)
+
+#define SQUARE(a) ((a * a))
+#define SQ_DIS(x, y) ((SQUARE(x) + SQUARE(y)))
+
+struct Brush{
+	int position;
+	float weight;
+};
+
+RWStructuredBuffer<Brush> erosion_brush;
+int n;
+int brush_array_len;
+int radius;
+
+[NUMTHREADS]
+void InitializeErosionBrush(uint3 id : SV_DispatchThreadID){
+	if (id.x < (uint)(n * n)){
+		int i = 0;
+		float weight_sum = 0;
+		for (int y = -radius; y <= radius; y++){
+			for (int x = -radius; x <= radius; x++){
+				int x2 = id.x % n + x;
+				int y2 = id.x / n + y;
+				
+				if (x2 >= 0 && x2 < n && y2 >= 0 && y2 < n){
+					int squared_distance = SQ_DIS(x, y);
+					int squared_radius = radius * radius;
+					if(squared_distance < radius * radius){
+						float weight = 1 - (float)squared_distance / squared_radius;
+						
+						erosion_brush[id.x * brush_array_len + i].position = y2 * n + x2;
+						erosion_brush[id.x * brush_array_len + i].weight = weight;
+						weight_sum += weight;
+						i++;
+					}
+				}
+			}
+		}
+		
+		for (int j = 0; j < brush_array_len; j++){
+			if (j < i)
+				erosion_brush[id.x * brush_array_len + j].weight /= weight_sum;
+			else
+				erosion_brush[id.x * brush_array_len + j].weight = -1;
+		}
+	}
+}
+
+[NUMTHREADS]
+void Erode(uint3 id : SV_DispatchThreadID){
+	
+}
